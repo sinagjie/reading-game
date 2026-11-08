@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>館員過卡工作台 - 圖書館閱讀集章系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+  <!-- 頂部資訊列 -->
+  <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center">
+    <div class="flex items-center gap-3">
+      <i class="fa-solid fa-qrcode text-amber-400 text-2xl"></i>
+      <h1 class="text-lg font-bold">館員專用過卡與核銷工作台</h1>
+    </div>
+    <span class="bg-amber-400/10 text-amber-400 text-xs font-semibold px-3 py-1 rounded-full border border-amber-400/20">內部管理模式</span>
+  </header>
+
+  <main class="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-6 space-y-6">
+
+    <!-- 條碼掃描 / 輸入區 -->
+    <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-6 shadow-xl space-y-4">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="font-bold text-white text-base">刷卡過卡登錄</h2>
+          <p class="text-xs text-slate-400 mt-0.5">請開啟鏡頭掃描，或接上條碼槍直接逼卡</p>
+        </div>
+        <button onclick="toggleScanner()" id="scanner-toggle-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition">
+          <i class="fa-solid fa-camera"></i> <span>開啟鏡頭掃描</span>
+        </button>
+      </div>
+
+      <!-- 鏡頭區域 -->
+      <div id="scanner-container" class="hidden bg-slate-900 rounded-xl overflow-hidden p-3 border border-slate-700">
+        <div id="interactive-reader" class="w-full max-w-sm mx-auto"></div>
+      </div>
+
+      <!-- 手動 / 條碼槍輸入 -->
+      <div class="flex gap-2">
+        <input type="text" id="admin-card-input" placeholder="請掃描或輸入卡號 (例如: CARD101)" class="flex-1 bg-slate-900 border border-slate-700 text-white font-mono text-base rounded-xl px-4 py-2.5 focus:outline-none focus:border-amber-400">
+        <button onclick="adminLoadCard()" class="bg-amber-400 text-slate-900 font-bold px-5 py-2.5 rounded-xl hover:bg-amber-300 transition">
+          載入卡片
+        </button>
+      </div>
+    </div>
+
+    <!-- 館員核銷操作區 (預設隱藏) -->
+    <div id="admin-panel" class="hidden bg-white text-slate-800 rounded-2xl shadow-xl p-6 space-y-6">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-4">
+        <div>
+          <span class="text-xs text-slate-400 font-bold">當前處理卡號</span>
+          <h3 id="admin-display-card-id" class="text-2xl font-black font-mono text-indigo-700">CARD101</h3>
+        </div>
+        <div id="admin-claim-area"></div>
+      </div>
+
+      <div>
+        <h4 class="font-bold text-slate-700 text-sm mb-3">點擊按鈕直接幫讀者完成任務：</h4>
+        <div id="admin-task-list" class="space-y-3"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    const TASKS = [
+      { id: 't1', title: '借閱 3 本書', icon: 'fa-book-open' },
+      { id: 't2', title: '參加一場講座/活動', icon: 'fa-users' },
+      { id: 't3', title: '尋找展覽隱藏密碼', icon: 'fa-magnifying-glass' },
+      { id: 't4', title: '填寫活動問卷', icon: 'fa-pen-to-square' }
+    ];
+
+    let currentAdminCardId = null;
+
+    function getDB() {
+      return JSON.parse(localStorage.getItem('lib_card_db')) || {};
+    }
+
+    function saveDB(db) {
+      localStorage.setItem('lib_card_db', JSON.stringify(db));
+    }
+
+    function adminLoadCard(cardIdOverride) {
+      const cardId = (cardIdOverride || document.getElementById('admin-card-input').value).trim().toUpperCase();
+      if (!cardId) return alert('請先輸入或掃描卡號');
+
+      currentAdminCardId = cardId;
+      const db = getDB();
+      if (!db[cardId]) {
+        db[cardId] = { completed: [], claimed: false };
+        saveDB(db);
+      }
+
+      renderAdminPanel();
+    }
+
+    function renderAdminPanel() {
+      const db = getDB();
+      const data = db[currentAdminCardId];
+      document.getElementById('admin-display-card-id').textContent = currentAdminCardId;
+
+      const claimArea = document.getElementById('admin-claim-area');
+      const isAllDone = data.completed.length === TASKS.length;
+
+      if (data.claimed) {
+        claimArea.innerHTML = `<span class="text-slate-400 text-xs font-bold bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">獎品已發放</span>`;
+      } else if (isAllDone) {
+        claimArea.innerHTML = `<button onclick="claimReward()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-md transition animate-bounce text-xs"><i class="fa-solid fa-gift mr-1"></i> 發放兌換獎品</button>`;
+      } else {
+        claimArea.innerHTML = `<span class="text-amber-600 text-xs font-bold bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">尚未集滿</span>`;
+      }
+
+      const adminTaskList = document.getElementById('admin-task-list');
+      adminTaskList.innerHTML = TASKS.map(task => {
+        const isDone = data.completed.includes(task.id);
+        return `
+          <div class="flex justify-between items-center p-3 rounded-xl border ${isDone ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200'}">
+            <div class="flex items-center gap-3">
+              <i class="fa-solid ${task.icon} ${isDone ? 'text-indigo-600' : 'text-slate-400'} text-base"></i>
+              <span class="font-bold text-sm ${isDone ? 'text-indigo-900' : 'text-slate-700'}">${task.title}</span>
+            </div>
+            <button onclick="toggleTaskStatus('${task.id}')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${isDone ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+              ${isDone ? '<i class="fa-solid fa-circle-check mr-1"></i> 已完成' : '蓋章解鎖'}
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('admin-panel').classList.remove('hidden');
+    }
+
+    function toggleTaskStatus(taskId) {
+      const db = getDB();
+      const data = db[currentAdminCardId];
+      const index = data.completed.indexOf(taskId);
+
+      if (index > -1) {
+        data.completed.splice(index, 1);
+      } else {
+        data.completed.push(taskId);
+        confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
+      }
+
+      saveDB(db);
+      renderAdminPanel();
+    }
+
+    function claimReward() {
+      if (confirm(`確定要為卡號 ${currentAdminCardId} 發放獎品嗎？`)) {
+        const db = getDB();
+        db[currentAdminCardId].claimed = true;
+        saveDB(db);
+        confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
+        renderAdminPanel();
+      }
+    }
+
+    let html5QrcodeScanner = null;
+    function toggleScanner() {
+      const container = document.getElementById('scanner-container');
+      const isHidden = container.classList.contains('hidden');
+
+      if (isHidden) {
+        container.classList.remove('hidden');
+        document.getElementById('scanner-toggle-btn').innerHTML = `<i class="fa-solid fa-xmark"></i> 關閉鏡頭`;
+        html5QrcodeScanner = new Html5QrcodeScanner("interactive-reader", { fps: 10, qrbox: 250 });
+        html5QrcodeScanner.render((decodedText) => {
+          document.getElementById('admin-card-input').value = decodedText;
+          adminLoadCard(decodedText);
+          toggleScanner();
+        });
+      } else {
+        container.classList.add('hidden');
+        document.getElementById('scanner-toggle-btn').innerHTML = `<i class="fa-solid fa-camera"></i> 開啟鏡頭掃描`;
+        if (html5QrcodeScanner) html5QrcodeScanner.clear();
+      }
+    }
+  </script>
+</body>
+</html>
